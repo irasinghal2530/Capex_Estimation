@@ -164,6 +164,9 @@ import traceback
 import re
 from typing import Union
 from difflib import get_close_matches
+from collections import deque
+from datetime import datetime
+
 
 # ---------------------------------------------------
 # Add project root to path so local modules resolve
@@ -174,17 +177,39 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from preprocessing import clean_column_names, encode_plant_age
 from model_inference import predict
 from train import get_feature_importance
+from logging.handlers import RotatingFileHandler
 
-# ---------------------------------------------------
-# Logging Config
-# ---------------------------------------------------
+RECENT_PREDICTIONS = deque(maxlen=10)
+
+
+# # ---------------------------------------------------
+# # Logging Config
+# # ---------------------------------------------------
+# LOG_FILE = "Capex_Estimation_API.log"
+# logging.basicConfig(
+#     level=logging.INFO,
+#     filename=LOG_FILE,  
+#     filemode="a"
+#     format="%(asctime)s | %(levelname)s | %(message)s",
+# )
+# logger = logging.getLogger("CAPEX_API")
+# logger.addHandler(logging.StreamHandler())
 LOG_FILE = "Capex_Estimation_API.log"
-logging.basicConfig(
-    level=logging.INFO,
-    filename=LOG_FILE,
-    format="%(asctime)s | %(levelname)s | %(message)s",
+
+handler = RotatingFileHandler(
+    LOG_FILE,
+    maxBytes=5 * 1024 * 1024,  # 5 MB
+    backupCount=5              # keep last 5 files
 )
+
+formatter = logging.Formatter(
+    "%(asctime)s | %(levelname)s | %(message)s"
+)
+handler.setFormatter(formatter)
+
 logger = logging.getLogger("CAPEX_API")
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
 logger.addHandler(logging.StreamHandler())
 
 logger.info("🚀 Starting CAPEX Estimation FastAPI Server…")
@@ -243,7 +268,8 @@ class InputData(BaseModel):
     Material_Type: Optional[str] = None
     Drivetrain: Optional[str] = None
     Automation_Level: Optional[str] = None
-    plant_age: Union[str, int, float]
+    # plant_age: Union[str, int, float]
+    plant_age : Optional[str] = None
     Line_Reuse: Optional[str] = None
     Lifetime_Volume: Optional[float] = None
     Target_Annual_Volume: Optional[float] = None
@@ -349,71 +375,71 @@ def normalize_values(df: pd.DataFrame, categorical_cols: list, numeric_cols: lis
 # ---------------------------------------------------
 # Prepare input: full pipeline from raw payload -> model-ready df
 # ---------------------------------------------------
-# def prepare_input_from_payload(payload: dict) -> pd.DataFrame:
-#     """
-#     1) Map keys to canonical feature names
-#     2) Build a DataFrame with feature_order columns
-#     3) encode plant_age
-#     4) normalize values (categorical lowercasing, numeric coercion)
-#     5) return dataframe ready for preprocessor.transform()
-#     """
-#     # Map keys to canonical feature names
-#     mapped = map_payload_keys(payload)
-
-#     # Create df and ensure all feature_order columns exist
-#     df = pd.DataFrame([mapped])
-#     for col in feature_order:
-#         if col not in df.columns:
-#             df[col] = None
-
-#     # Reorder to canonical order
-#     df = df[feature_order]
-
-#     # Clean column names (defensive, though feature_order should already be canonical)
-#     df = clean_column_names(df)
-
-#     # Plant age encoding
-#     df = encode_plant_age(df, column="plant_age")
-
-#     # Normalize values
-#     df = normalize_values(df, categorical_cols_in_pipe, numeric_cols_in_pipe)
-
-#     return df
-
-
 def prepare_input_from_payload(payload: dict) -> pd.DataFrame:
     """
-    Prepare a single-row dataframe for inference that exactly matches training
+    1) Map keys to canonical feature names
+    2) Build a DataFrame with feature_order columns
+    3) encode plant_age
+    4) normalize values (categorical lowercasing, numeric coercion)
+    5) return dataframe ready for preprocessor.transform()
     """
-
-    # 1️⃣ Map incoming keys to canonical feature names
+    # Map keys to canonical feature names
     mapped = map_payload_keys(payload)
 
-    # 2️⃣ Create DataFrame
+    # Create df and ensure all feature_order columns exist
     df = pd.DataFrame([mapped])
-
-    # 3️⃣ Clean column names FIRST (before reindexing)
-    df = clean_column_names(df)
-
-    # 4️⃣ Ensure all expected columns exist
     for col in feature_order:
         if col not in df.columns:
             df[col] = None
 
-    # 5️⃣ Encode plant_age BEFORE numeric coercion
-    df = encode_plant_age(df, column="plant_age")
-
-    # 6️⃣ Normalize values (lowercase categoricals, cast numerics)
-    df = normalize_values(
-        df,
-        categorical_cols_in_pipe,
-        numeric_cols_in_pipe
-    )
-
-    # 7️⃣ Final canonical order (last, always)
+    # Reorder to canonical order
     df = df[feature_order]
 
+    # Clean column names (defensive, though feature_order should already be canonical)
+    df = clean_column_names(df)
+
+    # Plant age encoding
+    df = encode_plant_age(df, column="plant_age")
+
+    # Normalize values
+    df = normalize_values(df, categorical_cols_in_pipe, numeric_cols_in_pipe)
+
     return df
+
+
+# def prepare_input_from_payload(payload: dict) -> pd.DataFrame:
+#     """
+#     Prepare a single-row dataframe for inference that exactly matches training
+#     """
+
+#     # 1️⃣ Map incoming keys to canonical feature names
+#     mapped = map_payload_keys(payload)
+
+#     # 2️⃣ Create DataFrame
+#     df = pd.DataFrame([mapped])
+
+#     # 3️⃣ Clean column names FIRST (before reindexing)
+#     df = clean_column_names(df)
+
+#     # 4️⃣ Ensure all expected columns exist
+#     for col in feature_order:
+#         if col not in df.columns:
+#             df[col] = None
+
+#     # 5️⃣ Encode plant_age BEFORE numeric coercion
+#     df = encode_plant_age(df, column="plant_age")
+
+#     # 6️⃣ Normalize values (lowercase categoricals, cast numerics)
+#     df = normalize_values(
+#         df,
+#         categorical_cols_in_pipe,
+#         numeric_cols_in_pipe
+#     )
+
+#     # 7️⃣ Final canonical order (last, always)
+#     df = df[feature_order]
+
+#     return df
 
 
 
@@ -431,19 +457,44 @@ def health():
 
 # print("Received from frontend:", data)
 
+# @app.post("/predict")
+# def predict_capex(data: InputData):
+#     print("RAW INPUT FROM FRONTEND:", data.dict()) 
+#     try:
+#         payload = data.dict()
+#         df = prepare_input_from_payload(payload)
+
+#         # transform and predict
+#         X = preprocessor.transform(df)
+#         y_pred = model.predict(X)[0]
+
+#         logger.info(f"Prediction successful → {y_pred:.4f}")
+#         return {"predicted_CAPEX": float(y_pred)}
+
+#     except Exception as e:
+#         logger.error("❌ Prediction error: %s", str(e))
+#         logger.error(traceback.format_exc())
+#         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
 @app.post("/predict")
 def predict_capex(data: InputData):
-    print("RAW INPUT FROM FRONTEND:", data.dict()) 
+    print("RAW INPUT FROM FRONTEND:", data.dict())
     try:
         payload = data.dict()
         df = prepare_input_from_payload(payload)
 
         # transform and predict
         X = preprocessor.transform(df)
-        y_pred = model.predict(X)[0]
+        y_pred = float(model.predict(X)[0])
+
+        # ✅ NEW: store recent prediction
+        RECENT_PREDICTIONS.append({
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "predicted_capex": round(y_pred, 2)
+        })
 
         logger.info(f"Prediction successful → {y_pred:.4f}")
-        return {"predicted_CAPEX": float(y_pred)}
+        return {"predicted_CAPEX": y_pred}
 
     except Exception as e:
         logger.error("❌ Prediction error: %s", str(e))
@@ -451,11 +502,33 @@ def predict_capex(data: InputData):
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
+
+# @app.post("/predict_batch")
+# def predict_batch(batch: BatchInputData):
+#     try:
+#         rows = [item.dict() for item in batch.data]
+#         processed_rows = []
+#         for r in rows:
+#             df_single = prepare_input_from_payload(r)
+#             processed_rows.append(df_single)
+
+#         df_all = pd.concat(processed_rows, ignore_index=True).reindex(columns=feature_order)
+#         X = preprocessor.transform(df_all)
+#         preds = model.predict(X)
+#         return {"predictions": preds.tolist()}
+
+#     except Exception as e:
+#         logger.error("❌ Batch prediction error: %s", str(e))
+#         logger.error(traceback.format_exc())
+#         raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
+
+
 @app.post("/predict_batch")
 def predict_batch(batch: BatchInputData):
     try:
         rows = [item.dict() for item in batch.data]
         processed_rows = []
+
         for r in rows:
             df_single = prepare_input_from_payload(r)
             processed_rows.append(df_single)
@@ -463,6 +536,14 @@ def predict_batch(batch: BatchInputData):
         df_all = pd.concat(processed_rows, ignore_index=True).reindex(columns=feature_order)
         X = preprocessor.transform(df_all)
         preds = model.predict(X)
+
+        # ✅ NEW: store each batch prediction
+        for p in preds:
+            RECENT_PREDICTIONS.append({
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "predicted_capex": round(float(p), 2)
+            })
+
         return {"predictions": preds.tolist()}
 
     except Exception as e:
@@ -470,6 +551,14 @@ def predict_batch(batch: BatchInputData):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
 
+
+@app.get("/recent_predictions")
+def recent_predictions():
+    return list(RECENT_PREDICTIONS)
+
+# @app.get("/metrics")
+# def get_model_metrics():
+#     return MODEL_METRICS
 
 @app.get("/feature_importance")
 def feature_importance(n: Optional[int] = 10):
