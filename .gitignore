@@ -41,3 +41,5 @@ info.txt
 out/
 
 src/models/
+
+src/config.py

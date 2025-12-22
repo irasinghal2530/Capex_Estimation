@@ -438,10 +438,6 @@
 #         raise HTTPException(status_code=500, detail=f"Failed to load categories: {str(e)}")
 
 
-
-
-#  src/backend/app.py
-
 # src/backend/app.py
 
 import os
