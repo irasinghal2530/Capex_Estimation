@@ -106,7 +106,7 @@ npm run dev
 ```
 UI will be available at `http://localhost:3000`
 
-## API Endpoints
+## API Endpoints(Example)
 
 ### Single Prediction
 ```http
@@ -275,11 +275,11 @@ sequenceDiagram
 
 ## Troubleshooting
 
-### Common Issues
+<!-- ### Common Issues
 - **Module not found**: Ensure virtual environment is activated
 - **API fails to load**: Check model files exist in `models/`
 - **Frontend errors**: Ensure backend is running on port 8000
-- **CSV parsing**: Ensure batch CSV has no header and correct column order
+- **CSV parsing**: Ensure batch CSV has no header and correct column order -->
 
 ### Logs
 - Pipeline logs: `src/Capex_Estimation_Pipeline.log`
