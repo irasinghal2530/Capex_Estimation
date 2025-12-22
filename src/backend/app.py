@@ -466,6 +466,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from .database import engine, SessionLocal
 from .models import Base, Prediction
 from .crud import save_prediction
+from .llm import router as llm_router
 from preprocessing import clean_column_names, encode_plant_age
 from model_inference import predict
 from train import get_feature_importance
@@ -511,6 +512,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include LLM router
+app.include_router(llm_router.router)
 
 # -----------------------------
 # Database dependency
@@ -703,51 +707,52 @@ def predict_batch(batch: BatchInputData, db: Session = Depends(get_db)):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Batch prediction failed")
 
-# @app.get("/recent_predictions")
-# def recent_predictions():
-#     return list(RECENT_PREDICTIONS)
-# #PRINT response to json
-
 @app.get("/recent_predictions")
 def recent_predictions():
-    response = list(RECENT_PREDICTIONS)
+    return list(RECENT_PREDICTIONS)
 
-    logger.info(
-        "Recent Predictions JSON:\n%s",
-        json.dumps(response, indent=2, default=str)
-    )
 
-    return response
+# @app.get("/recent_predictions")
+# def recent_predictions():
+#     response = list(RECENT_PREDICTIONS)
+
+#     logger.info(
+#         "Recent Predictions JSON:\n%s",
+#         json.dumps(response, indent=2, default=str)
+#     )
+
+#     return response
+
+
+@app.get("/feature_importance")
+def feature_importance(n: int = 10):
+    try:
+        fi = get_feature_importance(model, feature_order, top_n=n)
+        return {"top_features": fi.to_dict(orient="records")}
+    except Exception:
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Failed to compute feature importance")
 
 
 # @app.get("/feature_importance")
 # def feature_importance(n: int = 10):
 #     try:
 #         fi = get_feature_importance(model, feature_order, top_n=n)
-#         return {"top_features": fi.to_dict(orient="records")}
+#         response = {"top_features": fi.to_dict(orient="records")}
+
+#         logger.info(
+#             "Feature Importance JSON:\n%s",
+#             json.dumps(response, indent=2, default=str)
+#         )
+
+#         return response
+
 #     except Exception:
 #         logger.error(traceback.format_exc())
-#         raise HTTPException(status_code=500, detail="Failed to compute feature importance")
-
-@app.get("/feature_importance")
-def feature_importance(n: int = 10):
-    try:
-        fi = get_feature_importance(model, feature_order, top_n=n)
-        response = {"top_features": fi.to_dict(orient="records")}
-
-        logger.info(
-            "Feature Importance JSON:\n%s",
-            json.dumps(response, indent=2, default=str)
-        )
-
-        return response
-
-    except Exception:
-        logger.error(traceback.format_exc())
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to compute feature importance"
-        )
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Failed to compute feature importance"
+#         )
 
 
 
