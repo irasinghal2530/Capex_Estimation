@@ -42,4 +42,4 @@ out/
 
 src/models/
 
-src/config.py
+src/backend/config.py
