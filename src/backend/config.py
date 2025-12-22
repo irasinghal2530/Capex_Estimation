@@ -1,27 +1,3 @@
-# src/backend/config.py
-
-# import urllib.parse
-
-# DB_DRIVER = "ODBC Driver 18 for SQL Server"
-# DB_SERVER = "100.79.207.16,56661"
-# DB_NAME = "Cost_Estimation"
-# DB_USER = "Ira"
-# DB_PASSWORD = "6789"
-
-# params = urllib.parse.quote_plus(
-#     f"DRIVER={{{DB_DRIVER}}};"
-#     f"SERVER={DB_SERVER};"
-#     f"DATABASE={DB_NAME};"
-#     f"UID={DB_USER};"
-#     f"PWD={DB_PASSWORD};"
-#     "TrustServerCertificate=yes;"
-#     "timeout=30;"
-# )
-
-# DATABASE_URL = f"mssql+pyodbc:///?odbc_connect={params}"
-# #
-
-
 import os
 import urllib.parse
 from dotenv import load_dotenv
