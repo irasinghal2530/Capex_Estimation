@@ -7,6 +7,7 @@
 
 // const API = "http://localhost:8000";
 
+// // Numeric fields (everything else becomes dropdown or text)
 // const NUMERIC_FIELDS = new Set([
 //   "Plant_Age", "Lifetime_Volume", "Target_Annual_Volume",
 //   "Variants", "Number_of_Parts", "Avg_Part_Complexity",
@@ -15,41 +16,59 @@
 //   "Robotics", "Paint_Shop_Mods"
 // ]);
 
+// // All fields in correct order
+// const ALL_FIELDS = [
+//   "Vehicle_Type", "Material_Type", "Drivetrain", "Automation_Level",
+//   "Plant_Age", "Line_Reuse", "Lifetime_Volume", "Target_Annual_Volume",
+//   "Variants", "Number_of_Parts", "Avg_Part_Complexity", "BIW_Weight",
+//   "Stamping_Dies", "Injection_Molds", "Casting_Tools", "Jigs_and_Fixtures",
+//   "Assembly_Line_Equipment", "Robotics", "Paint_Shop_Mods"
+// ];
+
 // export default function PredictPage() {
-//   const [form, setForm] = useState({});
+//   // Initialize form with empty values
+//   const initialForm = ALL_FIELDS.reduce((acc, f) => {
+//     acc[f] = "";
+//     return acc;
+//   }, {});
+
+//   const [form, setForm] = useState(initialForm);
 //   const [categories, setCategories] = useState({});
 //   const [loading, setLoading] = useState(false);
 //   const [result, setResult] = useState(null);
 //   const [error, setError] = useState(null);
 
+//   // Load dropdown categories
 //   useEffect(() => {
-//     axios.get(`${API}/categories`)
+//     axios
+//       .get(`${API}/categories`)
 //       .then(res => setCategories(res.data))
 //       .catch(() => setError("Failed to load categories"));
 //   }, []);
 
-//   const ALL_FIELDS = [
-//     "Vehicle_Type", "Material_Type", "Drivetrain", "Automation_Level",
-//     "Plant_Age", "Line_Reuse", "Lifetime_Volume", "Target_Annual_Volume",
-//     "Variants", "Number_of_Parts", "Avg_Part_Complexity", "BIW_Weight",
-//     "Stamping_Dies", "Injection_Molds", "Casting_Tools", "Jigs_and_Fixtures",
-//     "Assembly_Line_Equipment", "Robotics", "Paint_Shop_Mods"
-//   ];
-
+//   // Update field in form
 //   const updateField = (field, value) => {
 //     setForm(prev => ({
 //       ...prev,
 //       [field]: NUMERIC_FIELDS.has(field)
-//         ? (value === "" ? null : Number(value))
+//         ? (value === "" ? undefined : Number(value))
 //         : value,
 //     }));
 //   };
 
+//   // Determine if a field should be dropdown
+//   const isDropdown = (field) => {
+//     const key = field.toLowerCase();
+//     return categories[key] !== undefined;
+//   };
 
+//   // Predict CAPEX
 //   const predict = async () => {
 //     setLoading(true);
-//     setResult(null);
 //     setError(null);
+//     setResult(null);
+
+//     console.log("Frontend sending:", form); // debug
 
 //     try {
 //       const res = await axios.post(`${API}/predict`, form);
@@ -61,31 +80,25 @@
 //     }
 //   };
 
-//   const isDropdown = (field) => {
-//     const key = field.toLowerCase();
-//     return Object.keys(categories).includes(key);
-//   };
-
 //   return (
 //     <div className="min-h-screen bg-gray-100 p-8 flex justify-center">
 //       <div className="w-full max-w-4xl">
-
-//         {/* Page Header */}
+        
 //         <h1 className="text-3xl font-bold text-gray-800 mb-6">
 //           CAPEX Prediction
 //         </h1>
 
-//         {/* Form Card */}
 //         <div className="bg-white shadow-lg rounded-2xl p-8 border border-gray-200">
 
 //           <h2 className="text-xl font-semibold text-gray-700 mb-4">
 //             Enter Project Parameters
 //           </h2>
 
+//           {/* FORM GRID */}
 //           <div className="grid grid-cols-2 gap-6">
 //             {ALL_FIELDS.map((field) => {
 //               const key = field.toLowerCase();
-//               const dropdownOptions = categories[key];
+//               const options = categories[key];
 
 //               return (
 //                 <div key={field} className="flex flex-col">
@@ -93,32 +106,37 @@
 //                     {field.replace(/_/g, " ")}
 //                   </label>
 
+//                   {/* DROPDOWN FIELDS */}
 //                   {isDropdown(field) ? (
 //                     <select
+//                       value={form[field] || ""}
 //                       onChange={(e) => updateField(field, e.target.value)}
 //                       className="p-2 rounded-lg border border-gray-300 bg-gray-50 hover:bg-gray-100 transition"
 //                     >
 //                       <option value="">Select {field}</option>
-//                       {dropdownOptions?.map((opt) => (
+//                       {options?.map((opt) => (
 //                         <option key={opt} value={opt}>
 //                           {opt}
 //                         </option>
 //                       ))}
 //                     </select>
 //                   ) : (
+//                     // NUMERIC/TEXT FIELDS
 //                     <input
 //                       type={NUMERIC_FIELDS.has(field) ? "number" : "text"}
+//                       value={form[field] || ""}
 //                       placeholder={field}
 //                       onChange={(e) => updateField(field, e.target.value)}
 //                       className="p-2 rounded-lg border border-gray-300 bg-gray-50 hover:bg-gray-100 transition"
 //                     />
 //                   )}
+
 //                 </div>
 //               );
 //             })}
 //           </div>
 
-//           {/* Predict Button */}
+//           {/* PREDICT BUTTON */}
 //           <button
 //             onClick={predict}
 //             disabled={loading}
@@ -127,18 +145,18 @@
 //             {loading ? "Predicting..." : "Predict CAPEX"}
 //           </button>
 
-//           {/* Error Message */}
+//           {/* ERROR */}
 //           {error && (
 //             <div className="mt-4 p-4 bg-red-100 text-red-700 rounded-lg border border-red-300">
 //               {String(error)}
 //             </div>
 //           )}
 
-//           {/* Result Card */}
+//           {/* RESULT */}
 //           {result !== null && (
 //             <div className="mt-6 p-5 bg-green-50 border border-green-200 rounded-xl text-lg shadow">
 //               <span className="font-semibold text-green-700">
-//                 Predicted CAPEX:&nbsp;
+//                 Predicted CAPEX:{" "}
 //               </span>
 //               <span className="font-bold text-green-800 text-xl">
 //                 {result}
@@ -146,10 +164,12 @@
 //             </div>
 //           )}
 //         </div>
+
 //       </div>
 //     </div>
 //   );
 // }
+
 
 
 "use client";
@@ -159,7 +179,7 @@ import axios from "axios";
 
 const API = "http://localhost:8000";
 
-// Numeric fields (everything else becomes dropdown or text)
+// Numeric fields
 const NUMERIC_FIELDS = new Set([
   "Plant_Age", "Lifetime_Volume", "Target_Annual_Volume",
   "Variants", "Number_of_Parts", "Avg_Part_Complexity",
@@ -168,7 +188,7 @@ const NUMERIC_FIELDS = new Set([
   "Robotics", "Paint_Shop_Mods"
 ]);
 
-// All fields in correct order
+// All fields
 const ALL_FIELDS = [
   "Vehicle_Type", "Material_Type", "Drivetrain", "Automation_Level",
   "Plant_Age", "Line_Reuse", "Lifetime_Volume", "Target_Annual_Volume",
@@ -178,7 +198,8 @@ const ALL_FIELDS = [
 ];
 
 export default function PredictPage() {
-  // Initialize form with empty values
+
+  // Initial empty form
   const initialForm = ALL_FIELDS.reduce((acc, f) => {
     acc[f] = "";
     return acc;
@@ -198,7 +219,7 @@ export default function PredictPage() {
       .catch(() => setError("Failed to load categories"));
   }, []);
 
-  // Update field in form
+  // Update form field
   const updateField = (field, value) => {
     setForm(prev => ({
       ...prev,
@@ -208,23 +229,27 @@ export default function PredictPage() {
     }));
   };
 
-  // Determine if a field should be dropdown
+  // Check dropdown
   const isDropdown = (field) => {
     const key = field.toLowerCase();
     return categories[key] !== undefined;
   };
 
-  // Predict CAPEX
+  // Predict
   const predict = async () => {
+    if (loading) return;
+
     setLoading(true);
     setError(null);
-    setResult(null);
 
-    console.log("Frontend sending:", form); // debug
+    console.log("Frontend sending:", form);
 
     try {
       const res = await axios.post(`${API}/predict`, form);
-      setResult(res.data.predicted_CAPEX);
+
+      // ✅ FIXED KEY NAME
+      setResult(res.data.predicted_capex);
+
     } catch (err) {
       setError(err?.response?.data?.detail || "Prediction failed");
     } finally {
@@ -235,7 +260,7 @@ export default function PredictPage() {
   return (
     <div className="min-h-screen bg-gray-100 p-8 flex justify-center">
       <div className="w-full max-w-4xl">
-        
+
         <h1 className="text-3xl font-bold text-gray-800 mb-6">
           CAPEX Prediction
         </h1>
@@ -258,7 +283,6 @@ export default function PredictPage() {
                     {field.replace(/_/g, " ")}
                   </label>
 
-                  {/* DROPDOWN FIELDS */}
                   {isDropdown(field) ? (
                     <select
                       value={form[field] || ""}
@@ -273,7 +297,6 @@ export default function PredictPage() {
                       ))}
                     </select>
                   ) : (
-                    // NUMERIC/TEXT FIELDS
                     <input
                       type={NUMERIC_FIELDS.has(field) ? "number" : "text"}
                       value={form[field] || ""}
@@ -282,13 +305,12 @@ export default function PredictPage() {
                       className="p-2 rounded-lg border border-gray-300 bg-gray-50 hover:bg-gray-100 transition"
                     />
                   )}
-
                 </div>
               );
             })}
           </div>
 
-          {/* PREDICT BUTTON */}
+          {/* BUTTON */}
           <button
             onClick={predict}
             disabled={loading}
@@ -315,10 +337,9 @@ export default function PredictPage() {
               </span>
             </div>
           )}
-        </div>
 
+        </div>
       </div>
     </div>
   );
 }
-

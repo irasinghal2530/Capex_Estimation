@@ -438,6 +438,381 @@
 #         raise HTTPException(status_code=500, detail=f"Failed to load categories: {str(e)}")
 
 
+
+
+##main code file
+# src/backend/app.py
+
+# import os
+# import re
+# import sys
+# import json
+# import traceback
+# import logging
+# from logging.handlers import RotatingFileHandler
+# from collections import deque
+# from datetime import datetime
+# from difflib import get_close_matches
+# from typing import List, Optional
+
+# import pandas as pd
+# import joblib
+# from fastapi import FastAPI, HTTPException, Depends
+# from fastapi.middleware.cors import CORSMiddleware
+# from pydantic import BaseModel
+# from sqlalchemy.orm import Session
+# from sqlalchemy.exc import SQLAlchemyError
+
+# # -----------------------------
+# # Backend imports
+# # -----------------------------
+# from .database import engine, SessionLocal
+# from .models import Base, Prediction
+# from .crud import save_prediction
+# from .llm import router as llm_router
+# from preprocessing import clean_column_names, encode_plant_age
+# from model_inference import predict
+# from train import get_feature_importance
+
+# # -----------------------------
+# # Logging setup
+# # -----------------------------
+# LOG_FILE = "Capex_Estimation_API.log"
+
+# handler = RotatingFileHandler(
+#     LOG_FILE,
+#     maxBytes=5 * 1024 * 1024,
+#     backupCount=5
+# )
+
+# formatter = logging.Formatter(
+#     "%(asctime)s | %(levelname)s | %(message)s"
+# )
+# handler.setFormatter(formatter)
+
+# logger = logging.getLogger("CAPEX_API")
+# logger.setLevel(logging.INFO)
+
+# if not logger.handlers:
+#     logger.addHandler(handler)
+#     logger.addHandler(logging.StreamHandler())
+
+# logger.info("Starting CAPEX Estimation FastAPI Server…")
+
+# # -----------------------------
+# # FastAPI setup
+# # -----------------------------
+# app = FastAPI(
+#     title="CAPEX Estimation API",
+#     version="1.0",
+#     description="Robust API for CAPEX prediction using ML models."
+# )
+
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+# # Include LLM router
+# app.include_router(llm_router.router)
+
+# # -----------------------------
+# # Database dependency
+# # -----------------------------
+# def get_db():
+#     db = SessionLocal()
+#     try:
+#         yield db
+#     finally:
+#         db.close()
+
+# # -----------------------------
+# # Startup: create tables
+# # -----------------------------
+# @app.on_event("startup")
+# def startup():
+#     Base.metadata.create_all(bind=engine)
+#     logger.info("Database tables created / verified.")
+
+# # -----------------------------
+# # Load ML artifacts
+# # -----------------------------
+# try:
+#     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+#     MODELS_DIR = os.path.join(BASE_DIR, "models")
+
+#     model = joblib.load(os.path.join(MODELS_DIR, "rf_model.pkl"))
+#     preprocessor = joblib.load(os.path.join(MODELS_DIR, "preprocessor.pkl"))
+#     feature_order = joblib.load(os.path.join(MODELS_DIR, "feature_order.pkl"))
+
+#     try:
+#         transformers = preprocessor.named_steps["preprocessor"].transformers_
+#         numeric_cols_in_pipe = list(transformers[0][2])
+#         categorical_cols_in_pipe = list(transformers[1][2])
+#     except Exception:
+#         numeric_cols_in_pipe = []
+#         categorical_cols_in_pipe = []
+
+#     logger.info("Model, preprocessor, and feature order loaded successfully.")
+
+# except Exception as e:
+#     logger.error("Failed to load ML artifacts")
+#     logger.error(traceback.format_exc())
+#     raise RuntimeError("Model or preprocessing artifacts missing or corrupted")
+
+# # -----------------------------
+# # Input schemas
+# # -----------------------------
+# class InputData(BaseModel):
+#     Vehicle_Type: Optional[str] = None
+#     Material_Type: Optional[str] = None
+#     Drivetrain: Optional[str] = None
+#     Automation_Level: Optional[str] = None
+#     plant_age: Optional[str] = None
+#     Line_Reuse: Optional[str] = None
+#     Lifetime_Volume: Optional[float] = None
+#     Target_Annual_Volume: Optional[float] = None
+#     Variants: Optional[int] = None
+#     Number_of_Parts: Optional[int] = None
+#     Avg_Part_Complexity: Optional[float] = None
+#     BIW_Weight: Optional[float] = None
+#     Stamping_Dies: Optional[float] = None
+#     Injection_Molds: Optional[float] = None
+#     Casting_Tools: Optional[float] = None
+#     Jigs_and_Fixtures: Optional[float] = None
+#     Assembly_Line_Equipment: Optional[float] = None
+#     Robotics: Optional[float] = None
+#     Paint_Shop_Mods: Optional[float] = None
+
+#     class Config:
+#         extra = "allow"
+
+# class BatchInputData(BaseModel):
+#     data: List[InputData]
+
+# # -----------------------------
+# # Key normalization
+# # -----------------------------
+# def _normalize_key(key: str) -> str:
+#     if key is None:
+#         return ""
+#     return re.sub(r"[^a-z0-9]", "", key.strip().lower())
+
+# _norm_to_feature = {
+#     re.sub(r"[^a-z0-9]", "", f.lower()): f
+#     for f in feature_order
+# }
+
+# def map_payload_keys(payload: dict) -> dict:
+#     mapped = {}
+#     for k, v in payload.items():
+#         kn = _normalize_key(k)
+#         if kn in _norm_to_feature:
+#             mapped[_norm_to_feature[kn]] = v
+#         else:
+#             match = get_close_matches(kn, _norm_to_feature.keys(), n=1, cutoff=0.7)
+#             if match:
+#                 mapped[_norm_to_feature[match[0]]] = v
+#     return mapped
+
+# def normalize_values(df: pd.DataFrame) -> pd.DataFrame:
+#     df = df.copy()
+
+#     for c in categorical_cols_in_pipe:
+#         if c in df.columns:
+#             df[c] = df[c].astype(str).str.strip().str.lower().replace({"nan": None})
+
+#     for c in numeric_cols_in_pipe:
+#         if c in df.columns:
+#             df[c] = pd.to_numeric(df[c], errors="coerce")
+#             if df[c].isna().any():
+#                 df[c] = df[c].fillna(df[c].median())
+
+#     return df
+
+# def prepare_input_from_payload(payload: dict) -> pd.DataFrame:
+#     mapped = map_payload_keys(payload)
+#     df = pd.DataFrame([mapped])
+
+#     for col in feature_order:
+#         if col not in df.columns:
+#             df[col] = None
+
+#     df = df[feature_order]
+#     df = clean_column_names(df)
+#     df = encode_plant_age(df, column="plant_age")
+#     df = normalize_values(df)
+
+#     return df
+
+# # -----------------------------
+# # In-memory recent cache
+# # -----------------------------
+# RECENT_PREDICTIONS = deque(maxlen=10)
+
+# # -----------------------------
+# # Routes
+# # -----------------------------
+# @app.get("/")
+# def root():
+#     return {"message": "CAPEX Estimation API is alive. Visit /docs"}
+
+# @app.get("/health")
+# def health():
+#     return {"status": "OK"}
+
+# @app.post("/predict")
+# def predict_capex(data: InputData, db: Session = Depends(get_db)):
+#     try:
+#         df = prepare_input_from_payload(data.dict())
+#         X = preprocessor.transform(df)
+#         y_pred = round(float(model.predict(X)[0]), 2)
+
+#         save_prediction(db, y_pred)
+
+#         RECENT_PREDICTIONS.append({
+#             "predicted_capex": y_pred,
+#             "timestamp": datetime.now().isoformat(timespec="seconds")
+            
+#         })
+
+#         logger.info(f"Prediction successful → {y_pred}")
+#         return {"predicted_CAPEX": y_pred}
+
+#     except Exception as e:
+#         logger.error(traceback.format_exc())
+#         raise HTTPException(status_code=500, detail="Prediction failed")
+
+
+# @app.post("/predict_batch")
+# def predict_batch(batch: BatchInputData, db: Session = Depends(get_db)):
+#     try:
+#         rows = [prepare_input_from_payload(item.dict()) for item in batch.data]
+#         df_all = pd.concat(rows, ignore_index=True)
+
+#         X = preprocessor.transform(df_all)
+#         preds = model.predict(X)
+
+#         for p in preds:
+#             y = round(float(p), 2)
+#             db.add(Prediction(predicted_capex=y))
+#             RECENT_PREDICTIONS.append({
+#                 "timestamp": datetime.now().isoformat(timespec="seconds"),
+#                 "predicted_capex": y
+#             })
+
+#         db.commit()
+#         return {"predictions": preds.tolist()}
+
+#     except Exception:
+#         logger.error(traceback.format_exc())
+#         raise HTTPException(status_code=500, detail="Batch prediction failed")
+
+# @app.get("/recent_predictions")
+# def recent_predictions():
+#     return list(RECENT_PREDICTIONS)
+
+
+# # @app.get("/recent_predictions")
+# # def recent_predictions():
+# #     response = list(RECENT_PREDICTIONS)
+
+# #     logger.info(
+# #         "Recent Predictions JSON:\n%s",
+# #         json.dumps(response, indent=2, default=str)
+# #     )
+
+# #     return response
+
+
+# @app.get("/feature_importance")
+# def feature_importance(n: int = 10):
+#     try:
+#         fi = get_feature_importance(model, feature_order, top_n=n)
+#         return {"top_features": fi.to_dict(orient="records")}
+#     except Exception:
+#         logger.error(traceback.format_exc())
+#         raise HTTPException(status_code=500, detail="Failed to compute feature importance")
+
+
+# # @app.get("/feature_importance")
+# # def feature_importance(n: int = 10):
+# #     try:
+# #         fi = get_feature_importance(model, feature_order, top_n=n)
+# #         response = {"top_features": fi.to_dict(orient="records")}
+
+# #         logger.info(
+# #             "Feature Importance JSON:\n%s",
+# #             json.dumps(response, indent=2, default=str)
+# #         )
+
+# #         return response
+
+# #     except Exception:
+# #         logger.error(traceback.format_exc())
+# #         raise HTTPException(
+# #             status_code=500,
+# #             detail="Failed to compute feature importance"
+# #         )
+
+
+
+# @app.get("/categories")
+# def get_categories():
+#     """
+#     Safely extract categorical options from the fitted preprocessor,
+#     regardless of pipeline nesting.
+#     """
+#     try:
+#         # Step 1 — Get the ColumnTransformer from pipeline
+#         col_transformer = preprocessor.named_steps.get("preprocessor")
+
+#         if col_transformer is None:
+#             raise ValueError("ColumnTransformer not found in preprocessor pipeline")
+
+#         # Step 2 — Find the categorical OneHotEncoder
+#         ohe = None
+#         categorical_cols = None
+
+#         for name, transformer, columns in col_transformer.transformers_:
+#             # Skip passthrough / drop
+#             if transformer == "drop" or transformer == "passthrough":
+#                 continue
+
+#             # Case 1: transformer IS the OneHotEncoder
+#             if hasattr(transformer, "categories_"):
+#                 ohe = transformer
+#                 categorical_cols = columns
+#                 break
+
+#             # Case 2: transformer is a Pipeline containing OneHotEncoder
+#             if hasattr(transformer, "steps"):
+#                 for step_name, step_obj in transformer.steps:
+#                     if hasattr(step_obj, "categories_"):
+#                         ohe = step_obj
+#                         categorical_cols = columns
+#                         break
+
+#         if ohe is None:
+#             raise ValueError("OneHotEncoder not found in preprocessor pipeline")
+
+#         # Step 3 — Package the results in a clean JSON dict
+#         categories_dict = {
+#             col: list(values) 
+#             for col, values in zip(categorical_cols, ohe.categories_)
+#         }
+
+#         return categories_dict
+
+#     except Exception as e:
+#         logger.error(f"❌ Failed to extract categories: {str(e)}")
+#         logger.error(traceback.format_exc())
+#         raise HTTPException(status_code=500, detail=f"Failed to load categories: {str(e)}")
+
+
 # src/backend/app.py
 
 import os
@@ -529,10 +904,10 @@ def get_db():
 # -----------------------------
 # Startup: create tables
 # -----------------------------
-@app.on_event("startup")
-def startup():
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created / verified.")
+# @app.on_event("startup")
+# def startup():
+#     Base.metadata.create_all(bind=engine)
+#     logger.info("Database tables created / verified.")
 
 # -----------------------------
 # Load ML artifacts
@@ -555,7 +930,7 @@ try:
 
     logger.info("Model, preprocessor, and feature order loaded successfully.")
 
-except Exception as e:
+except Exception:
     logger.error("Failed to load ML artifacts")
     logger.error(traceback.format_exc())
     raise RuntimeError("Model or preprocessing artifacts missing or corrupted")
@@ -584,11 +959,28 @@ class InputData(BaseModel):
     Robotics: Optional[float] = None
     Paint_Shop_Mods: Optional[float] = None
 
-    class Config:
-        extra = "allow"
+    # class Config:
+    #     extra = "allow"  # Swagger-safe
 
 class BatchInputData(BaseModel):
     data: List[InputData]
+
+# -----------------------------
+# 🔧 ADDITION: Payload sanitization (CRITICAL)
+# -----------------------------
+def sanitize_payload(payload: dict) -> dict:
+    """
+    Removes Swagger junk, empty values, and ensures JSON-safe persistence.
+    """
+    clean = {}
+    for k, v in payload.items():
+        if k.startswith("additionalProp"):
+            continue
+        if v in ("", [], {}):
+            continue
+        if isinstance(v, (str, int, float)) or v is None:
+            clean[k] = v
+    return clean
 
 # -----------------------------
 # Key normalization
@@ -661,69 +1053,134 @@ def root():
 def health():
     return {"status": "OK"}
 
+# -----------------------------
+# ✅ FIXED /predict
+# -----------------------------
+# @app.post("/predict")
+# def predict_capex(data: InputData, db: Session = Depends(get_db)):
+#     try:
+#         raw_payload = data.dict()
+#         clean_payload = sanitize_payload(raw_payload)
+
+#         df = prepare_input_from_payload(clean_payload)
+#         X = preprocessor.transform(df)
+#         y_pred = round(float(model.predict(X)[0]), 2)
+
+#         save_prediction(db, y_pred, clean_payload)
+#         # save_prediction(db, y_pred, params_dict=clean_payload)
+
+#         record = {
+#             "predicted_capex": y_pred,
+#             "parameters": clean_payload,
+#             "timestamp": datetime.now().isoformat(timespec="seconds")
+#         }
+
+#         RECENT_PREDICTIONS.append(record)
+
+#         logger.info(f"Prediction successful → {y_pred}")
+#         return record
+
+#     except Exception:
+#         logger.error(traceback.format_exc())
+#         raise HTTPException(status_code=500, detail="Prediction failed")
+
 @app.post("/predict")
 def predict_capex(data: InputData, db: Session = Depends(get_db)):
     try:
-        df = prepare_input_from_payload(data.dict())
+        logger.info("STEP 1: Received request")
+
+        raw_payload = data.dict()
+        logger.info(f"STEP 2: Raw payload keys = {list(raw_payload.keys())}")
+
+        clean_payload = sanitize_payload(raw_payload)
+        logger.info(f"STEP 3: Clean payload = {clean_payload}")
+
+        df = prepare_input_from_payload(clean_payload)
+        logger.info(f"STEP 4: DataFrame shape = {df.shape}")
+        logger.info(f"STEP 4a: DataFrame columns = {df.columns.tolist()}")
+
         X = preprocessor.transform(df)
+        logger.info(f"STEP 5: Transformed X shape = {X.shape}")
+
         y_pred = round(float(model.predict(X)[0]), 2)
+        logger.info(f"STEP 6: Prediction = {y_pred}")
 
-        save_prediction(db, y_pred)
+        save_prediction(db, y_pred, clean_payload)
+        logger.info("STEP 7: Saved prediction to DB")
 
-        RECENT_PREDICTIONS.append({
+        record = {
             "predicted_capex": y_pred,
+            "parameters": clean_payload,
             "timestamp": datetime.now().isoformat(timespec="seconds")
-            
-        })
+        }
 
-        logger.info(f"Prediction successful → {y_pred}")
-        return {"predicted_CAPEX": y_pred}
+        RECENT_PREDICTIONS.append(record)
+        logger.info("STEP 8: Added to RECENT_PREDICTIONS")
+
+        return record
 
     except Exception as e:
+        logger.error("❌ FAILURE OCCURRED")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail="Prediction failed")
+        raise HTTPException(status_code=500, detail=str(e))
 
+
+
+# -----------------------------
+# ✅ FIXED /predict_batch
+# -----------------------------
 @app.post("/predict_batch")
 def predict_batch(batch: BatchInputData, db: Session = Depends(get_db)):
     try:
-        rows = [prepare_input_from_payload(item.dict()) for item in batch.data]
-        df_all = pd.concat(rows, ignore_index=True)
+        rows, payloads = [], []
 
+        for item in batch.data:
+            raw = item.dict()
+            clean = sanitize_payload(raw)
+
+            rows.append(prepare_input_from_payload(clean))
+            payloads.append(clean)
+
+        df_all = pd.concat(rows, ignore_index=True)
         X = preprocessor.transform(df_all)
         preds = model.predict(X)
 
-        for p in preds:
-            y = round(float(p), 2)
-            db.add(Prediction(predicted_capex=y))
-            RECENT_PREDICTIONS.append({
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "predicted_capex": y
-            })
+        results = []
+
+        for y, params in zip(preds, payloads):
+            y = round(float(y), 2)
+
+            db.add(Prediction(
+                predicted_capex=y,
+                parameters=params
+            ))
+
+            record = {
+                "predicted_capex": y,
+                "parameters": params,
+                "timestamp": datetime.now().isoformat(timespec="seconds")
+            }
+
+            RECENT_PREDICTIONS.append(record)
+            results.append(record)
 
         db.commit()
-        return {"predictions": preds.tolist()}
+        return {"predictions": results}
 
     except Exception:
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Batch prediction failed")
 
+# -----------------------------
+# Recent predictions
+# -----------------------------
 @app.get("/recent_predictions")
 def recent_predictions():
     return list(RECENT_PREDICTIONS)
 
-
-# @app.get("/recent_predictions")
-# def recent_predictions():
-#     response = list(RECENT_PREDICTIONS)
-
-#     logger.info(
-#         "Recent Predictions JSON:\n%s",
-#         json.dumps(response, indent=2, default=str)
-#     )
-
-#     return response
-
-
+# -----------------------------
+# Feature importance
+# -----------------------------
 @app.get("/feature_importance")
 def feature_importance(n: int = 10):
     try:
@@ -733,79 +1190,39 @@ def feature_importance(n: int = 10):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Failed to compute feature importance")
 
-
-# @app.get("/feature_importance")
-# def feature_importance(n: int = 10):
-#     try:
-#         fi = get_feature_importance(model, feature_order, top_n=n)
-#         response = {"top_features": fi.to_dict(orient="records")}
-
-#         logger.info(
-#             "Feature Importance JSON:\n%s",
-#             json.dumps(response, indent=2, default=str)
-#         )
-
-#         return response
-
-#     except Exception:
-#         logger.error(traceback.format_exc())
-#         raise HTTPException(
-#             status_code=500,
-#             detail="Failed to compute feature importance"
-#         )
-
-
-
+# -----------------------------
+# Categories (dropdowns)
+# -----------------------------
 @app.get("/categories")
 def get_categories():
-    """
-    Safely extract categorical options from the fitted preprocessor,
-    regardless of pipeline nesting.
-    """
     try:
-        # Step 1 — Get the ColumnTransformer from pipeline
         col_transformer = preprocessor.named_steps.get("preprocessor")
 
         if col_transformer is None:
-            raise ValueError("ColumnTransformer not found in preprocessor pipeline")
+            raise ValueError("ColumnTransformer not found")
 
-        # Step 2 — Find the categorical OneHotEncoder
-        ohe = None
-        categorical_cols = None
+        ohe, categorical_cols = None, None
 
-        for name, transformer, columns in col_transformer.transformers_:
-            # Skip passthrough / drop
+        for _, transformer, columns in col_transformer.transformers_:
             if transformer == "drop" or transformer == "passthrough":
                 continue
-
-            # Case 1: transformer IS the OneHotEncoder
             if hasattr(transformer, "categories_"):
-                ohe = transformer
-                categorical_cols = columns
+                ohe, categorical_cols = transformer, columns
                 break
-
-            # Case 2: transformer is a Pipeline containing OneHotEncoder
             if hasattr(transformer, "steps"):
-                for step_name, step_obj in transformer.steps:
-                    if hasattr(step_obj, "categories_"):
-                        ohe = step_obj
-                        categorical_cols = columns
+                for _, step in transformer.steps:
+                    if hasattr(step, "categories_"):
+                        ohe, categorical_cols = step, columns
                         break
 
         if ohe is None:
-            raise ValueError("OneHotEncoder not found in preprocessor pipeline")
+            raise ValueError("OneHotEncoder not found")
 
-        # Step 3 — Package the results in a clean JSON dict
-        categories_dict = {
-            col: list(values) 
+        return {
+            col: list(values)
             for col, values in zip(categorical_cols, ohe.categories_)
         }
 
-        return categories_dict
-
     except Exception as e:
-        logger.error(f"❌ Failed to extract categories: {str(e)}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to load categories: {str(e)}")
-
-
+        raise HTTPException(status_code=500, detail=str(e))
