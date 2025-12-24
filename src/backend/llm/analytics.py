@@ -157,9 +157,11 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-from backend.database import engine
+# from backend.database import engine
+from ..database import engine
 # Ensure these imports exist in your project structure
-from backend.llm.prompts import SYSTEM_PROMPT, build_prompt
+# from backend.llm.prompts import SYSTEM_PROMPT, build_prompt
+from .prompts import SYSTEM_PROMPT, build_prompt
 
 # --------------------------------------------------
 # Environment + Gemini setup
@@ -218,46 +220,50 @@ def detect_anomalies(df: pd.DataFrame):
     ]
 
 def build_context(days: int = 30):
-    """Aggregates DB data into a context dictionary for the LLM."""
     df = get_recent_predictions(days)
+    raw_predictions = [
+        {"id": int(row.id), "predicted_capex": float(row.predicted_capex), "timestamp": row.timestamp.isoformat()}
+        for _, row in df.iterrows()
+    ]
     return {
         "count": int(len(df)),
         "mean_prediction": round(float(df["predicted_capex"].mean()), 2) if not df.empty else None,
         "trend": compute_trend(df),
-        "anomalies": detect_anomalies(df)
+        "anomalies": detect_anomalies(df),
+        "raw_predictions": raw_predictions
     }
 
-# --------------------------------------------------
-# LLM entry point (Corrected for SDK and Model naming)
-# --------------------------------------------------
 
 def perform_analysis(question: str, days: int = 30) -> str:
     context = build_context(days)
     prompt = build_prompt(question, context)
 
     try:
-        # Use a current 2025 model (gemini-3-flash-preview or gemini-2.5-flash)
-        # Note: No leading spaces and no 'models/' prefix needed here
         response = client.models.generate_content(
-            model="gemini-3-flash-preview", 
+            model="gemini-3-flash-preview",
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 temperature=0.7,
-                max_output_tokens=1000  # Increased for more detailed analysis
+                max_output_tokens=1000
             )
         )
-        
-        if response.text:
-            return response.text.strip()
+
+        # Extract content safely
+        # if hasattr(response, "candidates") and response.candidates:
+        #     return response.candidates[0].content.strip()
+        if response.candidates:
+            parts = response.candidates[0].content.parts
+            text = "".join(p.text for p in parts if hasattr(p, "text"))
+            return text.strip() if text else "Empty response from model."
         else:
             return "The model returned an empty response."
 
     except Exception as e:
-        # Catching specific errors can help debugging
         return f"Error generating analysis: {str(e)}"
 
-# Example usage check
+
 if __name__ == "__main__":
-    result = perform_analysis("Summarize the cost trends for the last month.")
+    question = "Summarize the cost trends and suggest areas for reduction."
+    result = perform_analysis(question)
     print(result)

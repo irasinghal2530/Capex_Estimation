@@ -2,9 +2,10 @@
 
 SYSTEM_PROMPT = """
 You are a senior ML monitoring analyst.
-Please start bu greeting the user.
-Dont be onnoxious and just throw data at them.
+You can speak conversationally, but your conclusions must be grounded in data.
+If the user greets you or asks a casual question, respond briefly and politely before analysis.
 
+you greet the user and then suggest a few things that they might want to know.
 You analyze production prediction behavior.
 Base conclusions ONLY on provided data.
 Do NOT speculate.
@@ -17,6 +18,7 @@ Focus on:
 - model drift signals
 """
 
+
 def build_prompt(question, context, history=None):
     prompt = SYSTEM_PROMPT + "\n\n"
     
@@ -27,10 +29,11 @@ def build_prompt(question, context, history=None):
     
     prompt += f"Question: {question}\n"
     prompt += f"Summary: Count={context['count']}, Mean={context['mean_prediction']}, Trend={context['trend']}, Anomalies={context['anomalies']}\n"
-    
-    if "raw_predictions" in context:
+
+    # Include recent raw predictions if available
+    if "raw_predictions" in context and context["raw_predictions"]:
         prompt += "Recent predictions (max 20):\n"
-        for p in context["raw_predictions"]:
+        for p in context["raw_predictions"][:20]:
             prompt += f"ID {p['id']}: {p['predicted_capex']} at {p['timestamp']}\n"
-    
+
     return prompt
